@@ -42,7 +42,17 @@ class ScreenMirrorService : Service() {
         if (intent?.action == ACTION_STOP) { stopMirroring(); return START_NOT_STICKY }
 
         val notification = buildNotification()
-        startForeground(NOTIFICATION_ID, notification)
+        // API 29+: startForeground(int, Notification, int) with FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION (0x20)
+        // Required on Android 14+ to match the declared foregroundServiceType
+        if (Build.VERSION.SDK_INT >= 29) {
+            try {
+                javaClass.getMethod("startForeground",
+                    Int::class.java, Notification::class.java, Int::class.java)
+                    .invoke(this, NOTIFICATION_ID, notification, 0x00000020)
+            } catch (e: Exception) { startForeground(NOTIFICATION_ID, notification) }
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
 
         val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, Activity.RESULT_CANCELED)
             ?: Activity.RESULT_CANCELED

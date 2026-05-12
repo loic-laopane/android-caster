@@ -124,12 +124,16 @@ class MainActivity : Activity() {
                 putExtra(ScreenMirrorService.EXTRA_DATA, data)
             }
             // API 26+: must use startForegroundService() — call via reflection (android.jar is API 23)
+            // Note: invoke() returns null for void methods; use a flag to avoid also calling startService
+            var usedForeground = false
             if (Build.VERSION.SDK_INT >= 26) {
                 try {
                     javaClass.superclass?.getMethod("startForegroundService", Intent::class.java)
-                        ?.invoke(this, svcIntent) ?: startService(svcIntent)
-                } catch (e: Exception) { startService(svcIntent) }
-            } else startService(svcIntent)
+                        ?.invoke(this, svcIntent)
+                    usedForeground = true
+                } catch (e: Exception) { /* fall through to startService */ }
+            }
+            if (!usedForeground) startService(svcIntent)
             bindService(Intent(this, ScreenMirrorService::class.java), mirrorConn, 0)
         }
     }

@@ -12,7 +12,7 @@ ANDROID_NS   = 'http://schemas.android.com/apk/res/android'
 TARGET_SVC   = 'ScreenMirrorService'
 ATTR_NAME    = 'foregroundServiceType'
 ATTR_RES_ID  = 0x0101054b   # android.R.attr.foregroundServiceType
-MEDIA_PROJ   = 0x40         # foregroundServiceType flag: mediaProjection = 64
+MEDIA_PROJ   = 0x20         # foregroundServiceType flag: mediaProjection = 32 (0x40 = camera!)
 
 def r32(b, o): return struct.unpack_from('<I', b, o)[0]
 def r16(b, o): return struct.unpack_from('<H', b, o)[0]
