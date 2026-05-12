@@ -1,5 +1,6 @@
 build/
 *.apk
+*.idsig
 debug.keystore
 local.properties
 .gradle/
