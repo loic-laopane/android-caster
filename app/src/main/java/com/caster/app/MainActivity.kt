@@ -268,7 +268,7 @@ class MainActivity : Activity() {
     // ─── Devices panel ────────────────────────────────────────────────────────
 
     private fun buildDevicesPanel(): View {
-        val root = scrollPanel()
+        val scroll = scrollPanel(); val root = scroll.content()
 
         root.addView(sectionTitle("Diffusion réseau"))
         root.addView(card().also { c ->
@@ -294,13 +294,13 @@ class MainActivity : Activity() {
             }
         }
         root.addView(deviceList, LinearLayout.LayoutParams(MATCH, WRAP))
-        return root
+        return scroll
     }
 
     // ─── Vehicle panel ────────────────────────────────────────────────────────
 
     private fun buildVehiclePanel(): View {
-        val root = scrollPanel()
+        val scroll = scrollPanel(); val root = scroll.content()
         root.addView(sectionTitle("Véhicule & Android Auto"))
 
         root.addView(card().also { c ->
@@ -367,13 +367,13 @@ class MainActivity : Activity() {
                 "Kia Sportage 2024 sans fil : Réglages › Général › Connexion › Android Auto › Sans fil."
             ))
         })
-        return root
+        return scroll
     }
 
     // ─── Media panel ─────────────────────────────────────────────────────────
 
     private fun buildMediaPanel(): View {
-        val root = scrollPanel()
+        val scroll = scrollPanel(); val root = scroll.content()
         root.addView(sectionTitle("Diffuser un média"))
 
         root.addView(card().also { c ->
@@ -430,13 +430,13 @@ class MainActivity : Activity() {
             c.addView(spacer(6))
             c.addView(bodyText("Ces services utilisent du contenu DRM. Utilisez le bouton Cast intégré dans leurs apps, ou la diffusion d'écran (onglet Écran) pour tout contenu."))
         })
-        return root
+        return scroll
     }
 
     // ─── Screen panel ─────────────────────────────────────────────────────────
 
     private fun buildScreenPanel(): View {
-        val root = scrollPanel()
+        val scroll = scrollPanel(); val root = scroll.content()
         root.addView(sectionTitle("Diffusion d'écran"))
 
         root.addView(card().also { c ->
@@ -469,7 +469,7 @@ class MainActivity : Activity() {
             c.addView(spacer(10))
             c.addView(neonBtn("Ouvrir les paramètres d'affichage", color = C_BLUE) { openCastSettings() })
         })
-        return root
+        return scroll
     }
 
     // ─── Tab switching ────────────────────────────────────────────────────────
@@ -648,28 +648,23 @@ class MainActivity : Activity() {
 
     // ─── Layout builders ─────────────────────────────────────────────────────
 
-    private fun scrollPanel(): LinearLayout {
-        val scroll = ScrollView(this).apply {
-            setBackgroundColor(C_BG)
-            layoutParams = FrameLayout.LayoutParams(MATCH, MATCH)
-            visibility = View.GONE
-        }
+    /** Returns a [LinearLayout] scroller pair. Use [scrollContent] to get the inner container. */
+    private fun scrollPanel(): ScrollView {
         val inner = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(14), dp(14), dp(14), dp(24))
         }
-        scroll.addView(inner)
-        // hack: we need to return LinearLayout but embed it in scroll — use tag
-        inner.tag = scroll
-        return inner
+        val scroll = ScrollView(this).apply {
+            setBackgroundColor(C_BG)
+            layoutParams = FrameLayout.LayoutParams(MATCH, MATCH)
+            visibility = View.GONE
+            addView(inner)
+        }
+        scroll.tag = inner
+        return scroll
     }
 
-    // Override addView to handle scrollPanel wrapping
-    private fun FrameLayout.addView(panel: LinearLayout) {
-        val scrollWrapper = panel.tag as? ScrollView
-        if (scrollWrapper != null) addView(scrollWrapper)
-        else addView(panel as View)
-    }
+    private fun ScrollView.content(): LinearLayout = tag as LinearLayout
 
     private fun card(bg: Int = C_SURFACE): LinearLayout = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
