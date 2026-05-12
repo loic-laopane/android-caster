@@ -73,7 +73,7 @@ $AAPT2 link \
     -o "$BUILD_DIR/apk/resources.apk" \
     --auto-add-overlay \
     --min-sdk-version 23 \
-    --target-sdk-version 23 \
+    --target-sdk-version 33 \
     --version-code 1 \
     --version-name "1.0" \
     2>&1 | grep -v "^$" || true

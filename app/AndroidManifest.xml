@@ -6,7 +6,7 @@
 
     <uses-sdk
         android:minSdkVersion="23"
-        android:targetSdkVersion="23" />
+        android:targetSdkVersion="33" />
 
     <!-- Network permissions for device discovery and casting -->
     <uses-permission android:name="android.permission.INTERNET" />
@@ -20,6 +20,9 @@
 
     <!-- Wake lock to keep screen cast alive -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- Required on Android 13+ (API 33) for foreground service notifications -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:name=".CasterApplication"

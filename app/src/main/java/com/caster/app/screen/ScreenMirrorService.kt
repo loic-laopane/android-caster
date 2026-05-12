@@ -119,44 +119,66 @@ class ScreenMirrorService : Service() {
         }
     }
 
-    @Suppress("DEPRECATION")
     private fun createNotificationChannel() {
-        // NotificationChannel required on API 26+, use reflection to stay compatible with API 23 sdk
+        // NotificationChannel required on API 26+ — use reflection to compile against API 23
         if (Build.VERSION.SDK_INT >= 26) {
             try {
                 val channelClass = Class.forName("android.app.NotificationChannel")
-                val importanceLow = 2 // NotificationManager.IMPORTANCE_LOW
-                val channel = channelClass.getConstructor(String::class.java, CharSequence::class.java, Int::class.java)
-                    .newInstance(CHANNEL_ID, "Screen Mirror", importanceLow)
+                val channel = channelClass
+                    .getConstructor(String::class.java, CharSequence::class.java, Int::class.java)
+                    .newInstance(CHANNEL_ID, "Screen Mirror", 2 /* IMPORTANCE_LOW */)
                 val nm = getSystemService(NotificationManager::class.java)
                 nm.javaClass.getMethod("createNotificationChannel", channelClass).invoke(nm, channel)
             } catch (e: Exception) {
-                android.util.Log.w(TAG, "createNotificationChannel failed: ${e.message}")
+                Log.w(TAG, "createNotificationChannel: ${e.message}")
             }
         }
     }
 
     @Suppress("DEPRECATION")
     private fun buildNotification(): Notification {
+        // FLAG_IMMUTABLE required when targeting SDK 31+
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         val pendingIntent = PendingIntent.getActivity(
-            this, 0,
-            Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT
-        )
+            this, 0, Intent(this, MainActivity::class.java), flags)
         val stopIntent = PendingIntent.getService(
             this, 1,
-            Intent(this, ScreenMirrorService::class.java).setAction(ACTION_STOP),
-            PendingIntent.FLAG_UPDATE_CURRENT
-        )
+            Intent(this, ScreenMirrorService::class.java).setAction(ACTION_STOP), flags)
 
-        return Notification.Builder(this)
-            .setContentTitle("Diffusion d'écran active")
-            .setContentText("Appuyez pour gérer")
-            .setSmallIcon(android.R.drawable.ic_menu_slideshow)
-            .setContentIntent(pendingIntent)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Arrêter", stopIntent)
-            .build()
+        return if (Build.VERSION.SDK_INT >= 26) {
+            // Use reflection to call Notification.Builder(context, channelId) — added in API 26
+            try {
+                val builderClass = Notification.Builder::class.java
+                val builder = builderClass
+                    .getConstructor(android.content.Context::class.java, String::class.java)
+                    .newInstance(this, CHANNEL_ID)
+                builderClass.getMethod("setContentTitle", CharSequence::class.java)
+                    .invoke(builder, "Diffusion d'écran active")
+                builderClass.getMethod("setContentText", CharSequence::class.java)
+                    .invoke(builder, "Appuyez pour gérer")
+                builderClass.getMethod("setSmallIcon", Int::class.java)
+                    .invoke(builder, android.R.drawable.ic_menu_slideshow)
+                builderClass.getMethod("setContentIntent", PendingIntent::class.java)
+                    .invoke(builder, pendingIntent)
+                builderClass.getMethod("build").invoke(builder) as Notification
+            } catch (e: Exception) {
+                buildLegacyNotification(pendingIntent, stopIntent)
+            }
+        } else {
+            buildLegacyNotification(pendingIntent, stopIntent)
+        }
     }
+
+    @Suppress("DEPRECATION")
+    private fun buildLegacyNotification(
+        contentIntent: PendingIntent, stopIntent: PendingIntent
+    ): Notification = Notification.Builder(this)
+        .setContentTitle("Diffusion d'écran active")
+        .setContentText("Appuyez pour gérer")
+        .setSmallIcon(android.R.drawable.ic_menu_slideshow)
+        .setContentIntent(contentIntent)
+        .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Arrêter", stopIntent)
+        .build()
 
     companion object {
         private const val TAG = "ScreenMirrorService"

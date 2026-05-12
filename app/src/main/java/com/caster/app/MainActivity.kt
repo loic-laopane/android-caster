@@ -115,7 +115,6 @@ class MainActivity : Activity() {
         }
         root.addView(toolbar, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, dpToPx(56)))
-        setActionBar(toolbar)
 
         // Status bar
         statusBar = TextView(this).apply {
@@ -510,10 +509,11 @@ class MainActivity : Activity() {
             }
             DeviceType.CHROMECAST -> {
                 chromeCaster.connect(device, {
+                    // All on background thread — no Thread.sleep on main thread
+                    chromeCaster.launchApp()
+                    Thread.sleep(1000)
+                    chromeCaster.castMedia(url, mime, url.substringAfterLast('/'))
                     mainHandler.post {
-                        chromeCaster.launchApp()
-                        Thread.sleep(1000)
-                        chromeCaster.castMedia(url, mime, url.substringAfterLast('/'))
                         castButton.isEnabled = true
                         stopCastButton.visibility = View.VISIBLE
                         setStatus("Diffusion Chromecast vers ${device.name}")
