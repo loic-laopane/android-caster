@@ -18,6 +18,7 @@ import android.util.TypedValue
 import android.view.*
 import android.widget.*
 import com.caster.app.adapter.DeviceAdapter
+import com.caster.app.auto.AutoMediaService
 import com.caster.app.cast.AndroidAutoConnector
 import com.caster.app.cast.ChromecastCaster
 import com.caster.app.cast.DlnaCaster
@@ -74,8 +75,18 @@ class MainActivity : Activity() {
     private lateinit var mirrorStatusLabel: TextView
     private lateinit var mirrorTargetLabel: TextView
 
+    // Media player UI
+    private lateinit var playerCard: LinearLayout
+    private lateinit var playerTitleView: TextView
+    private lateinit var playPauseBtn: Button
+    private lateinit var libraryContainer: LinearLayout
+    private lateinit var addUrlField: EditText
+    private lateinit var addTitleField: EditText
+    private var surfaceHolder: android.view.SurfaceHolder? = null
+
     // ─── Logic ────────────────────────────────────────────────────────────────
     private val dlnaCaster    = DlnaCaster()
+    private var autoMediaService: AutoMediaService? = null
     private val chromeCaster  = ChromecastCaster()
     private val deviceAdapter by lazy { DeviceAdapter(this) }
     private val vehicleAdapter by lazy { DeviceAdapter(this) }
@@ -95,6 +106,16 @@ class MainActivity : Activity() {
         override fun onServiceDisconnected(n: ComponentName) { mirrorService = null; updateMirrorUI() }
     }
 
+    private val autoMediaConn = object : ServiceConnection {
+        override fun onServiceConnected(n: ComponentName, b: IBinder) {
+            autoMediaService = (b as AutoMediaService.LocalBinder).getService()
+            surfaceHolder?.let { autoMediaService?.setDisplay(it) }
+            refreshLibraryUI()
+            updatePlayerUI()
+        }
+        override fun onServiceDisconnected(n: ComponentName) { autoMediaService = null }
+    }
+
     // ─── Lifecycle ────────────────────────────────────────────────────────────
 
     override fun onCreate(s: Bundle?) {
@@ -106,11 +127,16 @@ class MainActivity : Activity() {
         setContentView(buildRoot())
         showTab(TAB_DEVICES)
         requestNeededPermissions()
+        // Bind to AutoMediaService so the library and player are always available
+        val autoIntent = Intent(this, AutoMediaService::class.java)
+        startService(autoIntent)
+        bindService(autoIntent, autoMediaConn, Context.BIND_AUTO_CREATE)
     }
 
     override fun onDestroy() {
         discovery?.stop(); btDiscovery?.stop()
         multicastLock?.release(); chromeCaster.disconnect()
+        if (autoMediaService != null) unbindService(autoMediaConn)
         super.onDestroy()
     }
 
@@ -391,62 +417,138 @@ class MainActivity : Activity() {
 
     private fun buildMediaPanel(): View {
         val scroll = scrollPanel(); val root = scroll.content()
-        root.addView(sectionTitle("Diffuser un média"))
+        root.addView(sectionTitle("Bibliothèque & Lecture"))
 
+        // ── Player card (hidden until something plays) ──────────────────────
+        playerCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = GradientDrawable().apply {
+                setColor(C_SURFACE); setCornerRadius(dp(14).toFloat())
+                setStroke(dp(1), C_CYAN)
+            }
+            setPadding(dp(4), dp(4), dp(4), dp(12))
+            visibility = View.GONE
+        }
+        // Video surface
+        val sv = SurfaceView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(MATCH, dp(196)).apply { bottomMargin = dp(8) }
+            holder.addCallback(object : android.view.SurfaceHolder.Callback {
+                override fun surfaceCreated(h: android.view.SurfaceHolder) {
+                    surfaceHolder = h; autoMediaService?.setDisplay(h)
+                }
+                override fun surfaceDestroyed(h: android.view.SurfaceHolder) {
+                    surfaceHolder = null; autoMediaService?.setDisplay(null)
+                }
+                override fun surfaceChanged(h: android.view.SurfaceHolder, f: Int, w: Int, hh: Int) {}
+            })
+        }
+        playerCard.addView(sv)
+        playerTitleView = TextView(this).apply {
+            textSize = 14f; setTypeface(null, Typeface.BOLD); setTextColor(C_TEXT1)
+            setGravity(Gravity.CENTER); setPadding(dp(12), 0, dp(12), dp(6))
+        }
+        playerCard.addView(playerTitleView)
+        // Controls
+        val controls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; setGravity(Gravity.CENTER)
+        }
+        controls.addView(neonBtn("⏮", color = C_BLUE) {
+            val all = autoMediaService?.library?.getAll() ?: return@neonBtn
+            val idx = all.indexOfFirst { it.id == autoMediaService?.getCurrentEntry()?.id }
+            (if (idx > 0) all[idx - 1] else all.lastOrNull())?.let { autoMediaService?.playEntry(it); updatePlayerUI() }
+        }.apply { layoutParams = LinearLayout.LayoutParams(dp(56), dp(44)).apply { rightMargin = dp(8) } })
+        playPauseBtn = neonBtn("⏸", color = C_GREEN) {
+            val svc = autoMediaService ?: return@neonBtn
+            if (svc.isPlaying()) svc.pause() else svc.play(); updatePlayerUI()
+        }.apply { layoutParams = LinearLayout.LayoutParams(dp(64), dp(44)).apply { rightMargin = dp(8) } }
+        controls.addView(playPauseBtn)
+        controls.addView(neonBtn("⏭", color = C_BLUE) {
+            val all = autoMediaService?.library?.getAll() ?: return@neonBtn
+            val idx = all.indexOfFirst { it.id == autoMediaService?.getCurrentEntry()?.id }
+            (if (idx in 0 until all.size - 1) all[idx + 1] else all.firstOrNull())?.let { autoMediaService?.playEntry(it); updatePlayerUI() }
+        }.apply { layoutParams = LinearLayout.LayoutParams(dp(56), dp(44)) })
+        playerCard.addView(controls)
+        root.addView(playerCard)
+        root.addView(spacer(12))
+
+        // ── Library list ────────────────────────────────────────────────────
         root.addView(card().also { c ->
-            c.addView(labelText("URL du contenu"))
+            c.addView(labelText("Contenus enregistrés"))
+            c.addView(spacer(8))
+            libraryContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            c.addView(libraryContainer)
+        })
+        root.addView(spacer(12))
+
+        // ── Add content form ────────────────────────────────────────────────
+        root.addView(card(C_SURFACE2).also { c ->
+            c.addView(labelText("Ajouter un contenu"))
+            c.addView(spacer(8))
+            addTitleField = EditText(this).apply {
+                hint = "Titre (optionnel)"; setHintTextColor(C_TEXT3); setTextColor(C_TEXT1)
+                textSize = 14f; setSingleLine(true)
+                background = GradientDrawable().apply {
+                    setColor(C_SURFACE); setCornerRadius(dp(8).toFloat()); setStroke(dp(1), C_BORDER)
+                }
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+            }
+            c.addView(addTitleField, LinearLayout.LayoutParams(MATCH, WRAP).apply { bottomMargin = dp(8) })
+            addUrlField = EditText(this).apply {
+                hint = "https://exemple.com/video.mp4"; setHintTextColor(C_TEXT3); setTextColor(C_TEXT1)
+                textSize = 14f; setSingleLine(true)
+                inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
+                background = GradientDrawable().apply {
+                    setColor(C_SURFACE); setCornerRadius(dp(8).toFloat()); setStroke(dp(1), C_BORDER)
+                }
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+            }
+            c.addView(addUrlField, LinearLayout.LayoutParams(MATCH, WRAP).apply { bottomMargin = dp(12) })
+            c.addView(neonBtn("Ajouter et lire", color = C_CYAN) {
+                val url = addUrlField.text.toString().trim()
+                if (url.isEmpty()) { showToast("Entrez une URL"); return@neonBtn }
+                val title = addTitleField.text.toString().trim()
+                autoMediaService?.addAndPlay(title, url) ?: showToast("Service non connecté")
+                addUrlField.text.clear(); addTitleField.text.clear()
+                refreshLibraryUI(); updatePlayerUI()
+            })
+        })
+        root.addView(spacer(16))
+
+        // ── DLNA cast (cast a URL directly to a device) ─────────────────────
+        root.addView(card().also { c ->
+            c.addView(labelText("Diffuser vers un appareil DLNA"))
             c.addView(spacer(6))
             mediaUrlField = EditText(this).apply {
-                hint = "https://exemple.com/video.mp4"
-                setHintTextColor(C_TEXT3)
-                setTextColor(C_TEXT1)
-                textSize = 14f
-                setSingleLine(true)
+                hint = "https://exemple.com/video.mp4"; setHintTextColor(C_TEXT3); setTextColor(C_TEXT1)
+                textSize = 14f; setSingleLine(true)
                 background = GradientDrawable().apply {
-                    setColor(C_SURFACE2); setCornerRadius(dp(10).toFloat())
-                    setStroke(dp(1), C_BORDER)
+                    setColor(C_SURFACE2); setCornerRadius(dp(10).toFloat()); setStroke(dp(1), C_BORDER)
                 }
                 setPadding(dp(14), dp(12), dp(14), dp(12))
-                inputType = android.text.InputType.TYPE_TEXT_VARIATION_URI or
-                        android.text.InputType.TYPE_CLASS_TEXT
+                inputType = android.text.InputType.TYPE_TEXT_VARIATION_URI or android.text.InputType.TYPE_CLASS_TEXT
             }
             c.addView(mediaUrlField, LinearLayout.LayoutParams(MATCH, WRAP).apply { bottomMargin = dp(12) })
-
             c.addView(labelText("Type de contenu"))
             c.addView(spacer(6))
             mimeSpinner = Spinner(this).apply {
                 background = GradientDrawable().apply {
-                    setColor(C_SURFACE2); setCornerRadius(dp(10).toFloat())
-                    setStroke(dp(1), C_BORDER)
+                    setColor(C_SURFACE2); setCornerRadius(dp(10).toFloat()); setStroke(dp(1), C_BORDER)
                 }
-                adapter = ArrayAdapter(this@MainActivity,
-                    android.R.layout.simple_spinner_item,
-                    arrayOf("video/mp4","video/x-matroska","video/webm",
-                            "application/x-mpegURL","audio/mpeg","image/jpeg")).also {
-                    it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-                }
+                adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_item,
+                    arrayOf("video/mp4","video/x-matroska","video/webm","application/x-mpegURL","audio/mpeg","image/jpeg"))
+                    .also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
             }
             c.addView(mimeSpinner, LinearLayout.LayoutParams(MATCH, WRAP).apply { bottomMargin = dp(16) })
-
-            selectedDeviceLabel = bodyText("Aucun appareil sélectionné — allez dans l'onglet Appareils").apply {
-                setTextColor(C_TEXT3)
-            }
+            selectedDeviceLabel = bodyText("Aucun appareil sélectionné — allez dans l'onglet Appareils").apply { setTextColor(C_TEXT3) }
             c.addView(selectedDeviceLabel)
         })
         root.addView(spacer(12))
-
-        castBtn = neonBtn("Diffuser") { startCasting() }
+        castBtn = neonBtn("Diffuser vers l'appareil") { startCasting() }
         root.addView(castBtn)
         root.addView(spacer(8))
-        stopCastBtn = dangerBtn("Arrêter la diffusion") { stopCasting() }.apply { visibility = View.GONE }
+        stopCastBtn = dangerBtn("Arrêter la diffusion DLNA") { stopCasting() }.apply { visibility = View.GONE }
         root.addView(stopCastBtn)
-        root.addView(spacer(16))
-
-        root.addView(card(C_SURFACE2).also { c ->
-            c.addView(labelText("YouTube · Netflix · Prime Video"))
-            c.addView(spacer(6))
-            c.addView(bodyText("Ces services utilisent du contenu DRM. Utilisez le bouton Cast intégré dans leurs apps, ou la diffusion d'écran (onglet Écran) pour tout contenu."))
-        })
+        root.addView(spacer(24))
         return scroll
     }
 
@@ -654,6 +756,50 @@ class MainActivity : Activity() {
         mirrorStatusLabel.text = if (on) "ACTIF" else "Inactif"
         mirrorStatusLabel.setTextColor(if (on) C_GREEN else C_TEXT3)
         updateMirrorTargetLabel()
+    }
+
+    private fun refreshLibraryUI() {
+        libraryContainer.removeAllViews()
+        val entries = autoMediaService?.library?.getAll() ?: emptyList()
+        if (entries.isEmpty()) {
+            libraryContainer.addView(bodyText("Aucun contenu — ajoutez une URL ci-dessous").apply { setTextColor(C_TEXT3) })
+            return
+        }
+        entries.forEach { entry ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL; setGravity(Gravity.CENTER_VERTICAL)
+                setPadding(0, dp(6), 0, dp(6))
+            }
+            row.addView(TextView(this).apply {
+                text = entry.title; textSize = 14f; setTextColor(C_TEXT1)
+                layoutParams = LinearLayout.LayoutParams(0, WRAP, 1f)
+                setSingleLine(true); ellipsize = android.text.TextUtils.TruncateAt.END
+            })
+            row.addView(Button(this).apply {
+                text = "▶"; textSize = 16f; setTextColor(C_GREEN); setPadding(dp(8), 0, dp(8), 0)
+                background = GradientDrawable().apply { setColor(Color.TRANSPARENT) }
+                setOnClickListener { autoMediaService?.playEntry(entry); updatePlayerUI(); refreshLibraryUI() }
+            })
+            row.addView(Button(this).apply {
+                text = "✕"; textSize = 14f; setTextColor(C_RED); setPadding(dp(8), 0, dp(8), 0)
+                background = GradientDrawable().apply { setColor(Color.TRANSPARENT) }
+                setOnClickListener { autoMediaService?.library?.remove(entry.id); refreshLibraryUI() }
+            })
+            libraryContainer.addView(row)
+            if (entry != entries.last()) {
+                libraryContainer.addView(View(this).apply {
+                    setBackgroundColor(C_BORDER)
+                    layoutParams = LinearLayout.LayoutParams(MATCH, 1).apply { topMargin = dp(2); bottomMargin = dp(2) }
+                })
+            }
+        }
+    }
+
+    private fun updatePlayerUI() {
+        val entry = autoMediaService?.getCurrentEntry()
+        playerCard.visibility = if (entry != null) View.VISIBLE else View.GONE
+        playerTitleView.text = entry?.title ?: ""
+        playPauseBtn.text = if (autoMediaService?.isPlaying() == true) "⏸" else "▶"
     }
 
     private fun updateMirrorTargetLabel() {
