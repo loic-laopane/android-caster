@@ -12,6 +12,7 @@ import android.media.projection.MediaProjectionManager
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.WindowManager
@@ -28,6 +29,7 @@ class ScreenMirrorService : Service() {
     private var virtualDisplay: VirtualDisplay? = null
     private var encoder: MediaCodec? = null
     private var isRunning = false
+    private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onBind(intent: Intent): IBinder = binder
 
@@ -37,6 +39,8 @@ class ScreenMirrorService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_STOP) { stopMirroring(); return START_NOT_STICKY }
+
         val notification = buildNotification()
         startForeground(NOTIFICATION_ID, notification)
 
@@ -48,6 +52,7 @@ class ScreenMirrorService : Service() {
         mediaProjection = pm.getMediaProjection(resultCode, data)
         mediaProjection?.registerCallback(projectionCallback, null)
 
+        acquireWakeLock()
         startEncoding()
         return START_STICKY
     }
@@ -102,15 +107,29 @@ class ScreenMirrorService : Service() {
 
     private fun stopEncoding() {
         isRunning = false
-        try {
-            encoder?.stop()
-            encoder?.release()
-        } catch (e: Exception) { /* ignore */ }
+        try { encoder?.stop(); encoder?.release() } catch (e: Exception) { /* ignore */ }
         virtualDisplay?.release()
         mediaProjection?.stop()
-        encoder = null
-        virtualDisplay = null
-        mediaProjection = null
+        encoder = null; virtualDisplay = null; mediaProjection = null
+        releaseWakeLock()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun acquireWakeLock() {
+        try {
+            val pm = getSystemService(POWER_SERVICE) as PowerManager
+            wakeLock = pm.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "lowkick:screenmirror"
+            ).also { it.acquire(60 * 60 * 1000L) } // max 1 hour
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not acquire wake lock: ${e.message}")
+        }
+    }
+
+    private fun releaseWakeLock() {
+        try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (e: Exception) { /* ignore */ }
+        wakeLock = null
     }
 
     private val projectionCallback = object : MediaProjection.Callback() {
