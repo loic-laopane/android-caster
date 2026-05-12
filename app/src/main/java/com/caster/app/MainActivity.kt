@@ -135,15 +135,28 @@ class MainActivity : Activity() {
 
     private fun requestNeededPermissions() {
         val needed = mutableListOf<String>()
-        val toCheck = listOf(
+
+        // Always needed for Bluetooth discovery (API 23–30)
+        val always = listOf(
             android.Manifest.permission.ACCESS_FINE_LOCATION,
             android.Manifest.permission.RECORD_AUDIO
         )
-        for (perm in toCheck) {
-            if (checkSelfPermission(perm) != PackageManager.PERMISSION_GRANTED) {
-                needed.add(perm)
+        always.forEach { p ->
+            if (checkSelfPermission(p) != PackageManager.PERMISSION_GRANTED) needed.add(p)
+        }
+
+        // Android 12+ (API 31+): new Bluetooth runtime permissions
+        // Constants don't exist in API 23 sdk — use string literals
+        if (Build.VERSION.SDK_INT >= 31) {
+            val btPerms = listOf(
+                "android.permission.BLUETOOTH_SCAN",
+                "android.permission.BLUETOOTH_CONNECT"
+            )
+            btPerms.forEach { p ->
+                if (checkSelfPermission(p) != PackageManager.PERMISSION_GRANTED) needed.add(p)
             }
         }
+
         if (needed.isNotEmpty()) {
             requestPermissions(needed.toTypedArray(), REQ_PERMISSIONS)
         } else {

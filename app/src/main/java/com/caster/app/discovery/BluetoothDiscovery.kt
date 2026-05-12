@@ -27,15 +27,21 @@ class BluetoothDiscovery(
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context, intent: Intent) {
-            when (intent.action) {
-                BluetoothDevice.ACTION_FOUND -> {
-                    @Suppress("DEPRECATION")
-                    val btDevice = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
-                    btDevice?.let { handleDevice(it) }
+            try {
+                when (intent.action) {
+                    BluetoothDevice.ACTION_FOUND -> {
+                        @Suppress("DEPRECATION")
+                        val btDevice = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
+                        btDevice?.let { handleDevice(it) }
+                    }
+                    BluetoothAdapter.ACTION_DISCOVERY_FINISHED -> {
+                        listener.onDiscoveryFinished()
+                    }
                 }
-                BluetoothAdapter.ACTION_DISCOVERY_FINISHED -> {
-                    listener.onDiscoveryFinished()
-                }
+            } catch (e: SecurityException) {
+                Log.w(TAG, "BroadcastReceiver SecurityException: ${e.message}")
+            } catch (e: Exception) {
+                Log.e(TAG, "BroadcastReceiver error: ${e.message}")
             }
         }
     }
@@ -51,8 +57,13 @@ class BluetoothDiscovery(
             return
         }
 
-        // Also expose already-paired devices immediately (no permission needed)
-        bt.bondedDevices?.forEach { handleDevice(it) }
+        // Expose already-paired devices immediately
+        // getBondedDevices() requires BLUETOOTH_CONNECT on API 31+ — guard it
+        try {
+            bt.bondedDevices?.forEach { handleDevice(it) }
+        } catch (e: SecurityException) {
+            Log.w(TAG, "bondedDevices denied — BLUETOOTH_CONNECT not granted yet")
+        }
 
         val filter = IntentFilter().apply {
             addAction(BluetoothDevice.ACTION_FOUND)
@@ -61,10 +72,13 @@ class BluetoothDiscovery(
         try {
             context.registerReceiver(receiver, filter)
             registered = true
-            bt.startDiscovery()
+            bt.startDiscovery() // requires BLUETOOTH_SCAN on API 31+
             Log.d(TAG, "Bluetooth discovery started")
         } catch (e: SecurityException) {
-            listener.onBluetoothUnavailable("Permission Bluetooth refusée: ${e.message}")
+            listener.onBluetoothUnavailable(
+                "Permission Bluetooth refusee (BLUETOOTH_SCAN/CONNECT manquante). " +
+                "Verifiez les permissions dans les reglages."
+            )
         }
     }
 
