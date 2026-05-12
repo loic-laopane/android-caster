@@ -6,13 +6,25 @@
 
     <uses-sdk
         android:minSdkVersion="23"
-        android:targetSdkVersion="23" />
+        android:targetSdkVersion="33" />
 
     <!-- Network permissions for device discovery and casting -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+
+    <!-- Bluetooth — legacy (API < 31) -->
+    <uses-permission android:name="android.permission.BLUETOOTH" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+    <!-- Bluetooth — modern (API 31+) -->
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+    <!-- Location needed for Bluetooth discovery on API 23–30 -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
     <!-- Screen capture permission -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -20,6 +32,9 @@
 
     <!-- Wake lock to keep screen cast alive -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- Required on Android 13+ (API 33) for foreground service notifications -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:name=".CasterApplication"
@@ -41,6 +56,18 @@
         <service
             android:name=".screen.ScreenMirrorService"
             android:exported="false" />
+
+        <!-- Android Auto media source — appears in car's media list -->
+        <service
+            android:name=".auto.AutoMediaService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.media.browse.MediaBrowserService" />
+            </intent-filter>
+            <meta-data
+                android:name="com.google.android.gms.car.application"
+                android:resource="@xml/automotive_app_desc" />
+        </service>
 
     </application>
 

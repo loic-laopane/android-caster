@@ -12,6 +12,7 @@ import android.media.projection.MediaProjectionManager
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.WindowManager
@@ -28,6 +29,7 @@ class ScreenMirrorService : Service() {
     private var virtualDisplay: VirtualDisplay? = null
     private var encoder: MediaCodec? = null
     private var isRunning = false
+    private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onBind(intent: Intent): IBinder = binder
 
@@ -37,6 +39,8 @@ class ScreenMirrorService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_STOP) { stopMirroring(); return START_NOT_STICKY }
+
         val notification = buildNotification()
         startForeground(NOTIFICATION_ID, notification)
 
@@ -48,6 +52,7 @@ class ScreenMirrorService : Service() {
         mediaProjection = pm.getMediaProjection(resultCode, data)
         mediaProjection?.registerCallback(projectionCallback, null)
 
+        acquireWakeLock()
         startEncoding()
         return START_STICKY
     }
@@ -102,15 +107,29 @@ class ScreenMirrorService : Service() {
 
     private fun stopEncoding() {
         isRunning = false
-        try {
-            encoder?.stop()
-            encoder?.release()
-        } catch (e: Exception) { /* ignore */ }
+        try { encoder?.stop(); encoder?.release() } catch (e: Exception) { /* ignore */ }
         virtualDisplay?.release()
         mediaProjection?.stop()
-        encoder = null
-        virtualDisplay = null
-        mediaProjection = null
+        encoder = null; virtualDisplay = null; mediaProjection = null
+        releaseWakeLock()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun acquireWakeLock() {
+        try {
+            val pm = getSystemService(POWER_SERVICE) as PowerManager
+            wakeLock = pm.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "lowkick:screenmirror"
+            ).also { it.acquire(60 * 60 * 1000L) } // max 1 hour
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not acquire wake lock: ${e.message}")
+        }
+    }
+
+    private fun releaseWakeLock() {
+        try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (e: Exception) { /* ignore */ }
+        wakeLock = null
     }
 
     private val projectionCallback = object : MediaProjection.Callback() {
@@ -119,44 +138,66 @@ class ScreenMirrorService : Service() {
         }
     }
 
-    @Suppress("DEPRECATION")
     private fun createNotificationChannel() {
-        // NotificationChannel required on API 26+, use reflection to stay compatible with API 23 sdk
+        // NotificationChannel required on API 26+ — use reflection to compile against API 23
         if (Build.VERSION.SDK_INT >= 26) {
             try {
                 val channelClass = Class.forName("android.app.NotificationChannel")
-                val importanceLow = 2 // NotificationManager.IMPORTANCE_LOW
-                val channel = channelClass.getConstructor(String::class.java, CharSequence::class.java, Int::class.java)
-                    .newInstance(CHANNEL_ID, "Screen Mirror", importanceLow)
+                val channel = channelClass
+                    .getConstructor(String::class.java, CharSequence::class.java, Int::class.java)
+                    .newInstance(CHANNEL_ID, "Screen Mirror", 2 /* IMPORTANCE_LOW */)
                 val nm = getSystemService(NotificationManager::class.java)
                 nm.javaClass.getMethod("createNotificationChannel", channelClass).invoke(nm, channel)
             } catch (e: Exception) {
-                android.util.Log.w(TAG, "createNotificationChannel failed: ${e.message}")
+                Log.w(TAG, "createNotificationChannel: ${e.message}")
             }
         }
     }
 
     @Suppress("DEPRECATION")
     private fun buildNotification(): Notification {
+        // FLAG_IMMUTABLE required when targeting SDK 31+
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         val pendingIntent = PendingIntent.getActivity(
-            this, 0,
-            Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT
-        )
+            this, 0, Intent(this, MainActivity::class.java), flags)
         val stopIntent = PendingIntent.getService(
             this, 1,
-            Intent(this, ScreenMirrorService::class.java).setAction(ACTION_STOP),
-            PendingIntent.FLAG_UPDATE_CURRENT
-        )
+            Intent(this, ScreenMirrorService::class.java).setAction(ACTION_STOP), flags)
 
-        return Notification.Builder(this)
-            .setContentTitle("Diffusion d'écran active")
-            .setContentText("Appuyez pour gérer")
-            .setSmallIcon(android.R.drawable.ic_menu_slideshow)
-            .setContentIntent(pendingIntent)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Arrêter", stopIntent)
-            .build()
+        return if (Build.VERSION.SDK_INT >= 26) {
+            // Use reflection to call Notification.Builder(context, channelId) — added in API 26
+            try {
+                val builderClass = Notification.Builder::class.java
+                val builder = builderClass
+                    .getConstructor(android.content.Context::class.java, String::class.java)
+                    .newInstance(this, CHANNEL_ID)
+                builderClass.getMethod("setContentTitle", CharSequence::class.java)
+                    .invoke(builder, "Diffusion d'écran active")
+                builderClass.getMethod("setContentText", CharSequence::class.java)
+                    .invoke(builder, "Appuyez pour gérer")
+                builderClass.getMethod("setSmallIcon", Int::class.java)
+                    .invoke(builder, android.R.drawable.ic_menu_slideshow)
+                builderClass.getMethod("setContentIntent", PendingIntent::class.java)
+                    .invoke(builder, pendingIntent)
+                builderClass.getMethod("build").invoke(builder) as Notification
+            } catch (e: Exception) {
+                buildLegacyNotification(pendingIntent, stopIntent)
+            }
+        } else {
+            buildLegacyNotification(pendingIntent, stopIntent)
+        }
     }
+
+    @Suppress("DEPRECATION")
+    private fun buildLegacyNotification(
+        contentIntent: PendingIntent, stopIntent: PendingIntent
+    ): Notification = Notification.Builder(this)
+        .setContentTitle("Diffusion d'écran active")
+        .setContentText("Appuyez pour gérer")
+        .setSmallIcon(android.R.drawable.ic_menu_slideshow)
+        .setContentIntent(contentIntent)
+        .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Arrêter", stopIntent)
+        .build()
 
     companion object {
         private const val TAG = "ScreenMirrorService"
