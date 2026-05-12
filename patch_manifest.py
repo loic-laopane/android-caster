@@ -76,6 +76,11 @@ def patch_axml(raw: bytes) -> bytes:
     # Step 1: add "foregroundServiceType" to string pool if absent
     if fst_idx == -1:
         new_bytes = encode_s(ATTR_NAME)
+        # Pad string data so that (4-byte offset + string bytes) is 4-byte aligned.
+        # Android's ResStringPool requires the chunk size to be word-aligned.
+        pad = (4 - ((4 + len(new_bytes)) % 4)) % 4
+        new_bytes = new_bytes + b'\x00' * pad
+
         last_rel = r32(d, SP + sp_hdr + (sc-1)*4)
         _, last_len = read_s(d, SP + soff + last_rel)
         new_rel = last_rel + last_len
