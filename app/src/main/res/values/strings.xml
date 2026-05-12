@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Android Caster</string>
+    <string name="tab_devices">Périphériques</string>
+    <string name="tab_media">Média</string>
+    <string name="tab_screen">Écran</string>
+    <string name="no_devices">Aucun périphérique trouvé</string>
+    <string name="scan">Rechercher</string>
+    <string name="cast">Diffuser</string>
+    <string name="stop">Arrêter</string>
+</resources>
