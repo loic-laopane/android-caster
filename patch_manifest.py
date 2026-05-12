@@ -4,9 +4,9 @@ Inject android:foregroundServiceType="mediaProjection" into ScreenMirrorService
 in a compiled binary AndroidManifest.xml inside an APK.
 
 Usage: python3 patch_manifest.py <apk_path>
-The APK is modified in-place (backed up as <apk>.bak first).
+The APK is modified in-place using 'zip -u' (only the manifest is replaced).
 """
-import struct, zipfile, io, sys, shutil
+import struct, zipfile, io, sys, os, tempfile, shutil, subprocess
 
 ANDROID_NS   = 'http://schemas.android.com/apk/res/android'
 TARGET_SVC   = 'ScreenMirrorService'
@@ -73,7 +73,7 @@ def patch_axml(raw: bytes) -> bytes:
     if ns_idx == -1:
         print('  ERROR: android namespace not found'); return raw
 
-    # Step 1: add string if absent
+    # Step 1: add "foregroundServiceType" to string pool if absent
     if fst_idx == -1:
         new_bytes = encode_s(ATTR_NAME)
         last_rel = r32(d, SP + sp_hdr + (sc-1)*4)
@@ -96,7 +96,7 @@ def patch_axml(raw: bytes) -> bytes:
     else:
         print(f'  "{ATTR_NAME}" already in string pool at index {fst_idx}')
 
-    # Step 2: add resource ID to resource map
+    # Step 2: add/update resource ID in resource map
     sp_size = r32(d, SP+4)
     RM = SP + sp_size
     assert r16(d, RM) == 0x0180, f'Expected resource map at {RM}'
@@ -123,7 +123,6 @@ def patch_axml(raw: bytes) -> bytes:
         print(f'  Added resource ID 0x{ATTR_RES_ID:08x} to resource map')
 
     # Step 3: find <service android:name="...ScreenMirrorService..."> and inject attribute
-    # NOTE: in compiled binary AXML, element tag is "service"; class name is in android:name attribute
     sp_size = r32(d, SP+4)
     rm_size = r32(d, RM+4)
     pos = RM + rm_size
@@ -138,17 +137,14 @@ def patch_axml(raw: bytes) -> bytes:
             attr_cnt = r16(d, pos+28)
 
             if tag_name == 'service':
-                # Check android:name attribute value for TARGET_SVC
                 is_target = False
                 for i in range(attr_cnt):
                     ab = pos + 36 + i*20
                     a_name = r32(d, ab+4)
-                    a_type = d[ab+15]       # typedValue.dataType
-                    a_data = r32(d, ab+16)  # typedValue.data (string index when type=0x03)
-                    a_raw  = r32(d, ab+8)   # rawValue string index
-
-                    name_str = get_str(a_name)
-                    if name_str == 'name' and a_type == 0x03:
+                    a_type = d[ab+15]
+                    a_data = r32(d, ab+16)
+                    a_raw  = r32(d, ab+8)
+                    if get_str(a_name) == 'name' and a_type == 0x03:
                         val = get_str(a_data)
                         if not val and a_raw != 0xFFFFFFFF:
                             val = get_str(a_raw)
@@ -163,14 +159,7 @@ def patch_axml(raw: bytes) -> bytes:
                         return bytes(d)
 
                     new_attr = struct.pack('<IIIHBBI',
-                        ns_idx,      # namespace string index
-                        fst_idx,     # name: foregroundServiceType
-                        0xFFFFFFFF,  # rawValue (none)
-                        8,           # Res_value.size
-                        0,           # res0
-                        0x11,        # dataType: TYPE_INT_HEX
-                        MEDIA_PROJ   # data: 64
-                    )
+                        ns_idx, fst_idx, 0xFFFFFFFF, 8, 0, 0x11, MEDIA_PROJ)
 
                     ins = pos + csz
                     d = d[:ins] + bytearray(new_attr) + d[ins:]
@@ -178,52 +167,51 @@ def patch_axml(raw: bytes) -> bytes:
                     w32(d, pos+4,  csz+20)
                     w32(d, 4,      r32(d,4)+20)
 
-                    print(f'  Injected {ATTR_NAME}=0x{MEDIA_PROJ:02x} on {TARGET_SVC} at pos={pos}')
+                    print(f'  Injected {ATTR_NAME}=0x{MEDIA_PROJ:02x} on {TARGET_SVC}')
                     return bytes(d)
 
         pos += csz
 
     print(f'  WARNING: {TARGET_SVC} service element not found!')
-    # Debug: list all service elements found
-    sp_size2 = r32(d, SP+4); rm_size2 = r32(d, RM+4); pos2 = RM + rm_size2
-    while pos2 < len(d) - 8:
-        ct = r16(d, pos2); cs = r32(d, pos2+4)
-        if cs == 0: break
-        if ct == 0x0102:
-            tname = get_str(r32(d, pos2+20))
-            ac = r16(d, pos2+28)
-            print(f'    element "{tname}" at {pos2} with {ac} attrs')
-            for i in range(min(ac, 4)):
-                ab = pos2+36+i*20
-                print(f'      attr name="{get_str(r32(d,ab+4))}" type={d[ab+15]:02x} data={r32(d,ab+16)}')
-        pos2 += cs
     return bytes(d)
 
-def repack_apk(apk_path: str, new_manifest: bytes):
-    buf = io.BytesIO()
-    with zipfile.ZipFile(apk_path, 'r') as zin, \
-         zipfile.ZipFile(buf, 'w') as zout:
-        for info in zin.infolist():
-            data = new_manifest if info.filename == 'AndroidManifest.xml' \
-                   else zin.read(info.filename)
-            info2 = zipfile.ZipInfo(info.filename)
-            info2.compress_type = info.compress_type
-            info2.date_time = info.date_time
-            zout.writestr(info2, data)
-    with open(apk_path, 'wb') as f:
-        f.write(buf.getvalue())
+
+def update_manifest_in_apk(apk_path: str, new_manifest: bytes):
+    """
+    Replace AndroidManifest.xml in the APK using 'zip -u'.
+    This avoids full repack and preserves all other entries intact.
+    """
+    tmpdir = tempfile.mkdtemp()
+    try:
+        mf_path = os.path.join(tmpdir, 'AndroidManifest.xml')
+        with open(mf_path, 'wb') as f:
+            f.write(new_manifest)
+
+        result = subprocess.run(
+            ['zip', '-u', os.path.abspath(apk_path), 'AndroidManifest.xml'],
+            cwd=tmpdir,
+            capture_output=True, text=True
+        )
+        if result.returncode not in (0, 12):  # 12 = nothing to update (already same)
+            print(f'  zip -u stderr: {result.stderr}')
+            raise RuntimeError(f'zip -u failed with code {result.returncode}')
+    finally:
+        shutil.rmtree(tmpdir)
+
 
 def main():
     if len(sys.argv) < 2:
         print('Usage: patch_manifest.py <apk_file>'); sys.exit(1)
     apk = sys.argv[1]
-    shutil.copy2(apk, apk + '.bak')
+
     with zipfile.ZipFile(apk) as z:
         mf_orig = z.read('AndroidManifest.xml')
+
     print(f'Manifest: {len(mf_orig)} bytes')
     mf_patched = patch_axml(mf_orig)
     print(f'Patched:  {len(mf_patched)} bytes (+{len(mf_patched)-len(mf_orig)})')
-    repack_apk(apk, mf_patched)
-    print(f'Done. Backup: {apk}.bak')
+
+    update_manifest_in_apk(apk, mf_patched)
+    print(f'Done: {apk}')
 
 main()
