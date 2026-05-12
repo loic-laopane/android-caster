@@ -60,18 +60,18 @@ class DeviceAdapter(private val context: Context) : BaseAdapter() {
 
         layout.setPadding(p, p, p, p)
         layout.removeAllViews()
-        layout.setBackgroundColor(if (isSelected) 0xFF1976D2.toInt() else Color.WHITE)
+        layout.setBackgroundColor(if (isSelected) 0xFF1C3A6E.toInt() else 0xFF111428.toInt())
 
         val nameView = TextView(context).apply {
             text = device.displayName
             textSize = 16f
-            setTextColor(if (isSelected) Color.WHITE else Color.BLACK)
+            setTextColor(if (isSelected) 0xFF00D4FF.toInt() else 0xFFFFFFFF.toInt())
         }
 
         val infoView = TextView(context).apply {
             text = "${device.typeLabel} · ${device.host}"
             textSize = 13f
-            setTextColor(if (isSelected) 0xFFBBDEFB.toInt() else Color.GRAY)
+            setTextColor(if (isSelected) 0xFF90CAF9.toInt() else 0xFFB8C0E8.toInt())
         }
 
         layout.addView(nameView)

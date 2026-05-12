@@ -28,6 +28,7 @@
 
     <!-- Screen capture permission -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <!-- Wake lock to keep screen cast alive -->

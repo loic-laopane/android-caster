@@ -72,6 +72,7 @@ $AAPT2 link \
     --java "$BUILD_DIR/classes" \
     -o "$BUILD_DIR/apk/resources.apk" \
     --auto-add-overlay \
+    --warn-manifest-validation \
     --min-sdk-version 23 \
     --target-sdk-version 33 \
     --version-code 1 \
@@ -115,6 +116,24 @@ $APKSIGNER sign \
     --min-sdk-version 23 \
     --out "android-caster.apk" \
     "$BUILD_DIR/apk/app-aligned.apk"
+
+# --- Patch binary manifest to inject foregroundServiceType="mediaProjection" ---
+# (aapt2 with android-23.jar doesn't know this API-29 attribute, so we patch post-build)
+echo "[+] Patching manifest: android:foregroundServiceType=mediaProjection..."
+python3 patch_manifest.py android-caster.apk
+
+# Re-sign after patching (patching modifies the APK bytes)
+$ZIPALIGN -f 4 android-caster.apk android-caster-aligned2.apk
+$APKSIGNER sign \
+    --ks "$KEYSTORE" \
+    --ks-key-alias android \
+    --ks-pass pass:android \
+    --key-pass pass:android \
+    --min-sdk-version 23 \
+    --out "android-caster-final.apk" \
+    android-caster-aligned2.apk
+mv android-caster-final.apk android-caster.apk
+rm -f android-caster-aligned2.apk android-caster.apk.bak
 
 echo ""
 echo "=== Build successful! ==="

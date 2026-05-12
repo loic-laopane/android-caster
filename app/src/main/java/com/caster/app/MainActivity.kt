@@ -31,17 +31,17 @@ class MainActivity : Activity() {
 
     // ─── Dark neon palette ────────────────────────────────────────────────────
     private val C_BG       = 0xFF08091A.toInt()   // deepest background
-    private val C_SURFACE  = 0xFF0F1228.toInt()   // card surface
-    private val C_SURFACE2 = 0xFF181B38.toInt()   // elevated surface
-    private val C_BORDER   = 0xFF252748.toInt()   // subtle border
+    private val C_SURFACE  = 0xFF111428.toInt()   // card surface
+    private val C_SURFACE2 = 0xFF1C2040.toInt()   // elevated surface
+    private val C_BORDER   = 0xFF2E3260.toInt()   // subtle border
     private val C_CYAN     = 0xFF00D4FF.toInt()   // neon primary
-    private val C_BLUE     = 0xFF1565C0.toInt()   // deep blue
+    private val C_BLUE     = 0xFF2979FF.toInt()   // deep blue
     private val C_GREEN    = 0xFF00E676.toInt()   // success / active
     private val C_RED      = 0xFFFF3D57.toInt()   // danger / stop
     private val C_ORANGE   = 0xFFFF9100.toInt()   // warning
     private val C_TEXT1    = 0xFFFFFFFF.toInt()   // primary text
-    private val C_TEXT2    = 0xFF8890C4.toInt()   // secondary text
-    private val C_TEXT3    = 0xFF444870.toInt()   // hint / disabled
+    private val C_TEXT2    = 0xFFB8C0E8.toInt()   // secondary text — readable on dark navy
+    private val C_TEXT3    = 0xFF7880AA.toInt()   // hint / inactive — visible but muted
 
     // ─── Tab indices ─────────────────────────────────────────────────────────
     private val TAB_DEVICES = 0; private val TAB_VEHICLE = 1
@@ -119,10 +119,17 @@ class MainActivity : Activity() {
 
     override fun onActivityResult(rc: Int, result: Int, data: Intent?) {
         if (rc == REQ_SCREEN_CAPTURE && result == RESULT_OK && data != null) {
-            startService(Intent(this, ScreenMirrorService::class.java).apply {
+            val svcIntent = Intent(this, ScreenMirrorService::class.java).apply {
                 putExtra(ScreenMirrorService.EXTRA_RESULT_CODE, result)
                 putExtra(ScreenMirrorService.EXTRA_DATA, data)
-            })
+            }
+            // API 26+: must use startForegroundService() — call via reflection (android.jar is API 23)
+            if (Build.VERSION.SDK_INT >= 26) {
+                try {
+                    javaClass.superclass?.getMethod("startForegroundService", Intent::class.java)
+                        ?.invoke(this, svcIntent) ?: startService(svcIntent)
+                } catch (e: Exception) { startService(svcIntent) }
+            } else startService(svcIntent)
             bindService(Intent(this, ScreenMirrorService::class.java), mirrorConn, 0)
         }
     }
