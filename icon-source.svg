@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108">
+  <!-- Background rounded square -->
+  <rect width="108" height="108" rx="22" fill="#0d1b2a"/>
+
+  <!-- ── GT-R style car silhouette (side view) ── -->
+  <!-- Body lower sill -->
+  <rect x="9" y="64" width="84" height="7" rx="2" fill="#8b1a1a"/>
+
+  <!-- Main body -->
+  <path d="M12,64 L12,54 L20,46 L36,40 L66,39 L80,42 L90,50 L93,64 Z"
+        fill="#c0392b"/>
+
+  <!-- Cabin / roofline (fastback shape) -->
+  <path d="M28,54 L36,40 L66,39 L78,46 L78,54 Z" fill="#e74c3c"/>
+
+  <!-- Windshield (front glass) -->
+  <path d="M58,54 L66,39 L76,43 L78,54 Z" fill="#5dade2" opacity="0.85"/>
+
+  <!-- Rear window -->
+  <path d="M28,54 L34,42 L44,40 L44,54 Z" fill="#5dade2" opacity="0.65"/>
+
+  <!-- Hood slope front -->
+  <path d="M80,42 L90,50 L90,54 L78,54 L78,46 Z" fill="#a93226"/>
+
+  <!-- Front lower splitter hint -->
+  <rect x="89" y="60" width="5" height="4" rx="1" fill="#7b241c"/>
+
+  <!-- Side mirror -->
+  <rect x="78" y="46" width="5" height="3" rx="1" fill="#922b21"/>
+
+  <!-- Door crease line -->
+  <line x1="44" y1="54" x2="79" y2="54" stroke="#a93226" stroke-width="1.2"/>
+
+  <!-- Rear wheel arch -->
+  <path d="M12,64 Q12,50 26,50 Q40,50 40,64" fill="#0d1b2a"/>
+  <!-- Rear wheel -->
+  <circle cx="26" cy="66" r="13" fill="#1c2833"/>
+  <circle cx="26" cy="66" r="9"  fill="#566573"/>
+  <circle cx="26" cy="66" r="4"  fill="#1c2833"/>
+  <line x1="26" y1="57" x2="26" y2="75" stroke="#1c2833" stroke-width="2"/>
+  <line x1="17" y1="66" x2="35" y2="66" stroke="#1c2833" stroke-width="2"/>
+  <line x1="20" y1="59" x2="32" y2="73" stroke="#1c2833" stroke-width="1.5"/>
+  <line x1="20" y1="73" x2="32" y2="59" stroke="#1c2833" stroke-width="1.5"/>
+
+  <!-- Front wheel arch -->
+  <path d="M68,64 Q68,50 82,50 Q96,50 96,64" fill="#0d1b2a"/>
+  <!-- Front wheel -->
+  <circle cx="82" cy="66" r="13" fill="#1c2833"/>
+  <circle cx="82" cy="66" r="9"  fill="#566573"/>
+  <circle cx="82" cy="66" r="4"  fill="#1c2833"/>
+  <line x1="82" y1="57" x2="82" y2="75" stroke="#1c2833" stroke-width="2"/>
+  <line x1="73" y1="66" x2="91" y2="66" stroke="#1c2833" stroke-width="2"/>
+  <line x1="76" y1="59" x2="88" y2="73" stroke="#1c2833" stroke-width="1.5"/>
+  <line x1="76" y1="73" x2="88" y2="59" stroke="#1c2833" stroke-width="1.5"/>
+
+  <!-- Ground reflection -->
+  <ellipse cx="54" cy="81" rx="40" ry="3" fill="#000" opacity="0.25"/>
+
+  <!-- ── Cast / Android Auto badge (top-right) ── -->
+  <circle cx="84" cy="22" r="18" fill="#1565c0"/>
+  <!-- Monitor / screen outline -->
+  <rect x="73" y="13" width="22" height="15" rx="2"
+        fill="none" stroke="white" stroke-width="2"/>
+  <!-- Stand -->
+  <rect x="81" y="28" width="6" height="3" rx="1" fill="white"/>
+  <rect x="79" y="30" width="10" height="2" rx="1" fill="white"/>
+  <!-- WiFi arcs (cast symbol inside screen) -->
+  <path d="M80,24 Q80,20 84,20 Q88,20 88,24"
+        stroke="white" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <path d="M77,24 Q77,16 84,16 Q91,16 91,24"
+        stroke="white" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <circle cx="84" cy="24" r="2" fill="white"/>
+</svg>
