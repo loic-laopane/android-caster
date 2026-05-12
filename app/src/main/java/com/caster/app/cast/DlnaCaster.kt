@@ -11,6 +11,19 @@ class DlnaCaster {
 
     private val executor = Executors.newSingleThreadExecutor()
 
+    fun castUrl(serviceUrl: String, mediaUrl: String, mimeType: String = "video/h264",
+                onSuccess: () -> Unit, onError: (String) -> Unit) {
+        val device = CastDevice("_stream", "Stream", "", 0,
+            com.caster.app.model.DeviceType.DLNA, serviceUrl)
+        castUrl(device, mediaUrl, mimeType, onSuccess, onError)
+    }
+
+    fun stop(serviceUrl: String) {
+        val device = CastDevice("_stream", "Stream", "", 0,
+            com.caster.app.model.DeviceType.DLNA, serviceUrl)
+        stop(device) {}
+    }
+
     fun castUrl(device: CastDevice, mediaUrl: String, mimeType: String = "video/mp4",
                 onSuccess: () -> Unit, onError: (String) -> Unit) {
         executor.submit {

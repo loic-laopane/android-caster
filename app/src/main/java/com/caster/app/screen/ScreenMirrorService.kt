@@ -1,6 +1,7 @@
 package com.caster.app.screen
 
 import android.app.*
+import android.content.Context
 import android.content.Intent
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
@@ -9,6 +10,7 @@ import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
+import android.net.wifi.WifiManager
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
@@ -17,6 +19,7 @@ import android.util.DisplayMetrics
 import android.util.Log
 import android.view.WindowManager
 import com.caster.app.MainActivity
+import com.caster.app.cast.DlnaCaster
 
 class ScreenMirrorService : Service() {
 
@@ -28,8 +31,13 @@ class ScreenMirrorService : Service() {
     private var mediaProjection: MediaProjection? = null
     private var virtualDisplay: VirtualDisplay? = null
     private var encoder: MediaCodec? = null
-    private var isRunning = false
+    private var streamServer: ScreenStreamServer? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    private val dlnaCaster = DlnaCaster()
+    private var dlnaServiceUrl: String? = null
+    private var encodeThread: Thread? = null
+    var isRunning = false
+        private set
 
     override fun onBind(intent: Intent): IBinder = binder
 
@@ -40,19 +48,20 @@ class ScreenMirrorService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) { stopMirroring(); return START_NOT_STICKY }
+        if (isRunning) return START_STICKY
 
         val notification = buildNotification()
-        // API 29+: startForeground(int, Notification, int) with FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION (0x20)
-        // Required on Android 14+ to match the declared foregroundServiceType
         if (Build.VERSION.SDK_INT >= 29) {
             try {
                 javaClass.getMethod("startForeground",
                     Int::class.java, Notification::class.java, Int::class.java)
-                    .invoke(this, NOTIFICATION_ID, notification, 0x00000020)
+                    .invoke(this, NOTIFICATION_ID, notification, 0x00000020 /* MEDIA_PROJECTION */)
             } catch (e: Exception) { startForeground(NOTIFICATION_ID, notification) }
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
+
+        dlnaServiceUrl = intent?.getStringExtra(EXTRA_DLNA_SERVICE_URL)
 
         val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, Activity.RESULT_CANCELED)
             ?: Activity.RESULT_CANCELED
@@ -81,6 +90,7 @@ class ScreenMirrorService : Service() {
 
     private fun startEncoding() {
         try {
+            @Suppress("DEPRECATION")
             val wm = getSystemService(WINDOW_SERVICE) as WindowManager
             val metrics = DisplayMetrics()
             wm.defaultDisplay.getRealMetrics(metrics)
@@ -100,6 +110,9 @@ class ScreenMirrorService : Service() {
             encoder?.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             val surface = encoder?.createInputSurface()
 
+            // Start HTTP stream server before creating the virtual display
+            streamServer = ScreenStreamServer(STREAM_PORT).also { it.start() }
+
             virtualDisplay = mediaProjection?.createVirtualDisplay(
                 "ScreenMirror", w, h, dpi,
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
@@ -109,19 +122,71 @@ class ScreenMirrorService : Service() {
             encoder?.start()
             isRunning = true
             Log.i(TAG, "Screen mirroring started at ${w}x${h}")
+
+            // Send DLNA command so the renderer connects to our HTTP server
+            val serviceUrl = dlnaServiceUrl
+            if (serviceUrl != null) {
+                val localIp = getLocalIp()
+                if (localIp != null) {
+                    val streamUrl = "http://$localIp:$STREAM_PORT/screen"
+                    Log.i(TAG, "Sending DLNA play: $streamUrl -> $serviceUrl")
+                    dlnaCaster.castUrl(serviceUrl, streamUrl,
+                        onSuccess = { Log.i(TAG, "DLNA play accepted") },
+                        onError   = { e -> Log.w(TAG, "DLNA error: $e") }
+                    )
+                } else {
+                    Log.w(TAG, "Could not determine local WiFi IP — DLNA skipped")
+                }
+            }
+
+            // Read encoded output and feed it to the stream server
+            encodeThread = Thread({ readEncoderOutput() }, "screen-encode-out").also { it.start() }
+
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start encoding", e)
             isRunning = false
         }
     }
 
+    private fun readEncoderOutput() {
+        val info = MediaCodec.BufferInfo()
+        outer@ while (isRunning) {
+            val idx = encoder?.dequeueOutputBuffer(info, 10_000L) ?: break
+            if (idx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED || idx == MediaCodec.INFO_TRY_AGAIN_LATER) {
+                continue
+            }
+            if (idx >= 0) {
+                val buf = encoder!!.getOutputBuffer(idx)
+                if (buf != null) {
+                    val data = ByteArray(info.size)
+                    buf.get(data)
+                    streamServer?.write(data)
+                }
+                encoder!!.releaseOutputBuffer(idx, false)
+                if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break@outer
+            }
+        }
+    }
+
     private fun stopEncoding() {
         isRunning = false
+        encodeThread?.interrupt()
+        encodeThread = null
         try { encoder?.stop(); encoder?.release() } catch (e: Exception) { /* ignore */ }
         virtualDisplay?.release()
         mediaProjection?.stop()
         encoder = null; virtualDisplay = null; mediaProjection = null
+        streamServer?.stop(); streamServer = null
+        dlnaServiceUrl?.let { dlnaCaster.stop(it) }
         releaseWakeLock()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun getLocalIp(): String? {
+        val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager ?: return null
+        val ip = wm.connectionInfo.ipAddress
+        if (ip == 0) return null
+        return String.format("%d.%d.%d.%d", ip and 0xff, ip shr 8 and 0xff, ip shr 16 and 0xff, ip shr 24 and 0xff)
     }
 
     @Suppress("DEPRECATION")
@@ -131,7 +196,7 @@ class ScreenMirrorService : Service() {
             wakeLock = pm.newWakeLock(
                 PowerManager.PARTIAL_WAKE_LOCK,
                 "lowkick:screenmirror"
-            ).also { it.acquire(60 * 60 * 1000L) } // max 1 hour
+            ).also { it.acquire(60 * 60 * 1000L) }
         } catch (e: Exception) {
             Log.w(TAG, "Could not acquire wake lock: ${e.message}")
         }
@@ -143,19 +208,16 @@ class ScreenMirrorService : Service() {
     }
 
     private val projectionCallback = object : MediaProjection.Callback() {
-        override fun onStop() {
-            stopEncoding()
-        }
+        override fun onStop() { stopEncoding() }
     }
 
     private fun createNotificationChannel() {
-        // NotificationChannel required on API 26+ — use reflection to compile against API 23
         if (Build.VERSION.SDK_INT >= 26) {
             try {
                 val channelClass = Class.forName("android.app.NotificationChannel")
                 val channel = channelClass
                     .getConstructor(String::class.java, CharSequence::class.java, Int::class.java)
-                    .newInstance(CHANNEL_ID, "Screen Mirror", 2 /* IMPORTANCE_LOW */)
+                    .newInstance(CHANNEL_ID, "Screen Mirror", 2)
                 val nm = getSystemService(NotificationManager::class.java)
                 nm.javaClass.getMethod("createNotificationChannel", channelClass).invoke(nm, channel)
             } catch (e: Exception) {
@@ -166,7 +228,6 @@ class ScreenMirrorService : Service() {
 
     @Suppress("DEPRECATION")
     private fun buildNotification(): Notification {
-        // FLAG_IMMUTABLE required when targeting SDK 31+
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         val pendingIntent = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java), flags)
@@ -175,7 +236,6 @@ class ScreenMirrorService : Service() {
             Intent(this, ScreenMirrorService::class.java).setAction(ACTION_STOP), flags)
 
         return if (Build.VERSION.SDK_INT >= 26) {
-            // Use reflection to call Notification.Builder(context, channelId) — added in API 26
             try {
                 val builderClass = Notification.Builder::class.java
                 val builder = builderClass
@@ -213,8 +273,10 @@ class ScreenMirrorService : Service() {
         private const val TAG = "ScreenMirrorService"
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "screen_mirror_channel"
+        const val STREAM_PORT = 8080
         const val EXTRA_RESULT_CODE = "result_code"
         const val EXTRA_DATA = "data"
+        const val EXTRA_DLNA_SERVICE_URL = "dlna_service_url"
         const val ACTION_STOP = "com.caster.app.STOP_MIRROR"
     }
 }

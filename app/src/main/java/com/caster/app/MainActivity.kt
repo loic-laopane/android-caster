@@ -72,6 +72,7 @@ class MainActivity : Activity() {
     private lateinit var mirrorBtn: Button
     private lateinit var stopMirrorBtn: Button
     private lateinit var mirrorStatusLabel: TextView
+    private lateinit var mirrorTargetLabel: TextView
 
     // ─── Logic ────────────────────────────────────────────────────────────────
     private val dlnaCaster    = DlnaCaster()
@@ -119,9 +120,13 @@ class MainActivity : Activity() {
 
     override fun onActivityResult(rc: Int, result: Int, data: Intent?) {
         if (rc == REQ_SCREEN_CAPTURE && result == RESULT_OK && data != null) {
+            val targetDevice = deviceAdapter.getSelectedDevice()
             val svcIntent = Intent(this, ScreenMirrorService::class.java).apply {
                 putExtra(ScreenMirrorService.EXTRA_RESULT_CODE, result)
                 putExtra(ScreenMirrorService.EXTRA_DATA, data)
+                targetDevice?.serviceUrl?.takeIf { it.isNotEmpty() }?.let {
+                    putExtra(ScreenMirrorService.EXTRA_DLNA_SERVICE_URL, it)
+                }
             }
             // API 26+: must use startForegroundService() — call via reflection (android.jar is API 23)
             // Note: invoke() returns null for void methods; use a flag to avoid also calling startService
@@ -301,6 +306,7 @@ class MainActivity : Activity() {
             setOnItemClickListener { _, _, pos, _ ->
                 deviceAdapter.setSelected(deviceAdapter.getItem(pos).id)
                 updateSelectedDeviceLabel()
+                updateMirrorTargetLabel()
                 showToast("${deviceAdapter.getItem(pos).name} sélectionné")
             }
         }
@@ -455,10 +461,16 @@ class MainActivity : Activity() {
                 text = "Inactif"; textSize = 24f
                 setTypeface(null, Typeface.BOLD)
                 setTextColor(C_TEXT3); setGravity(Gravity.CENTER)
-                setPadding(0, dp(16), 0, dp(16))
+                setPadding(0, dp(16), 0, dp(4))
             }
             c.addView(mirrorStatusLabel)
-            c.addView(bodyText("Capturez l'intégralité de votre écran et diffusez-le vers un Chromecast ou une TV.\nFonctionne aussi écran éteint — un service en arrière-plan maintient la diffusion active.").apply {
+            mirrorTargetLabel = TextView(this).apply {
+                text = "Aucun appareil sélectionné"
+                textSize = 12f; setTextColor(C_TEXT3); setGravity(Gravity.CENTER)
+                setPadding(0, 0, 0, dp(12))
+            }
+            c.addView(mirrorTargetLabel)
+            c.addView(bodyText("Sélectionnez un appareil DLNA dans l'onglet Appareils, puis démarrez la diffusion. Le flux vidéo sera envoyé en direct vers cet appareil.\nFonctionne aussi écran éteint.").apply {
                 setGravity(Gravity.CENTER)
             })
         })
@@ -641,6 +653,19 @@ class MainActivity : Activity() {
         stopMirrorBtn.visibility = if (on) View.VISIBLE else View.GONE
         mirrorStatusLabel.text = if (on) "ACTIF" else "Inactif"
         mirrorStatusLabel.setTextColor(if (on) C_GREEN else C_TEXT3)
+        updateMirrorTargetLabel()
+    }
+
+    private fun updateMirrorTargetLabel() {
+        val d = deviceAdapter.getSelectedDevice()
+        mirrorTargetLabel.text = when {
+            d != null && d.serviceUrl.isNotEmpty() -> "→ ${d.displayName}"
+            d != null -> "${d.displayName} (pas de service DLNA)"
+            else -> "Aucun appareil sélectionné"
+        }
+        mirrorTargetLabel.setTextColor(
+            if (d != null && d.serviceUrl.isNotEmpty()) C_CYAN else C_TEXT3
+        )
     }
 
     private fun setStatus(text: String, dotColor: Int = C_TEXT3) {
